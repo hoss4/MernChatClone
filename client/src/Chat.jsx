@@ -62,6 +62,7 @@ export default function Chat() {
                     </div>
                 ))
                 }
+                
             </div>
             <div className="flex flex-col bg-blue-50 w-2/3 p-2 ">
                 <div className="flex-grow ">
