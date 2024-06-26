@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
 const User = require('./models/User');
+const Message = require('./models/Message');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
@@ -27,6 +28,24 @@ app.use(cors(
         origin: [process.env.CLIENT_URL, process.env.CLIENT_URL2, process.env.CLIENT_URL3]
     }
 ));
+
+async function GetUserInfoFromReq(req) {
+
+
+    return new Promise((resolve, reject) => {
+        const token = req.cookies?.token;
+
+        if (token) {
+            jwt.verify(token, jwtSecret, {}, (err, UserData) => {
+                if (err) throw err;
+                resolve(UserData);
+            });
+
+        }else{
+            reject('No token found');
+        }
+    });
+}
 
 app.get('/profile', (req, res) => {
 
@@ -70,6 +89,21 @@ app.post('/login', async (req, res) => {
     }
 });
 
+app.get('/messages/:userId', async (req, res) => {
+
+    const { userId } = req.params;
+    const userInfo = await GetUserInfoFromReq(req);
+    const ourUserId = userInfo.id;
+
+    const messages = await Message.find({
+        sender: { $in: [userId, ourUserId] },
+        recipient: { $in: [userId, ourUserId] }
+    }).sort({ createdAt: 1 });
+
+    res.json(messages);
+
+});
+
 app.post('/register', async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -93,8 +127,7 @@ app.post('/register', async (req, res) => {
     } catch (err) {
         res.status(500).json(err.message);
     }
-}
-);
+});
 const server = app.listen(4000);
 
 const wss = new ws.WebSocketServer({ server })
@@ -113,7 +146,7 @@ wss.on('connection', (connection, req) => {
 
                     if (err) throw err;
                     const { id, username } = userData;
-                    
+
                     connection.userid = id;
                     connection.username = username;
 
@@ -121,8 +154,27 @@ wss.on('connection', (connection, req) => {
             }
         }
     }
+
+    connection.on('message', async (message) => {
+        const messageData = JSON.parse(message.toString());
+        const { recipient, text } = messageData;
+        if (recipient && text) {
+
+            const messageDoc = await Message.create({ sender: connection.userid, recipient, text });
+
+            [...wss.clients]
+                .filter(client => client.userid === recipient)
+                .forEach(c => c.send(JSON.stringify({
+                    text,
+                    sender: connection.userid,
+                    recipient,
+                    _id: messageDoc._id,
+                })));
+        }
+    });
+
     [...wss.clients].forEach(client => {
-         
-        client.send(JSON.stringify({online : [...wss.clients].map(client => ({userId:client.userid,username:client.username}))}))
+
+        client.send(JSON.stringify({ online: [...wss.clients].map(client => ({ userId: client.userid, username: client.username })) }))
     });
 });
